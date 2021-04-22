@@ -15,6 +15,11 @@ public class DataCluster extends PosteriorCluster<DataCluster.Node> {
     }
 
     @Override
+    public ThresholdIntegrator getIntegrator() {
+      return clusterNode.getIntegrator();
+    }
+
+    @Override
     public final void activate() {
       clusterNode.activate();
       super.activate();

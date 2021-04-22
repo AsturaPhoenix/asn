@@ -20,11 +20,6 @@ public abstract class OutputNode implements Posterior {
   }
 
   @Override
-  public ThresholdIntegrator getIntegrator() {
-    return input.getIntegrator();
-  }
-
-  @Override
   public Connections.Priors getPriors() {
     return input.getPriors();
   }

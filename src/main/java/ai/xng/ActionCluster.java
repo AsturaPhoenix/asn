@@ -25,6 +25,11 @@ public class ActionCluster extends PosteriorCluster<ActionCluster.Node> {
     }
 
     @Override
+    public ThresholdIntegrator getIntegrator() {
+      return clusterNode.getIntegrator();
+    }
+
+    @Override
     public final void activate() {
       clusterNode.activate();
       try {

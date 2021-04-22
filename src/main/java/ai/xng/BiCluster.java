@@ -32,6 +32,11 @@ public class BiCluster extends PosteriorCluster<BiCluster.Node> {
     }
 
     @Override
+    public ThresholdIntegrator getIntegrator() {
+      return clusterNode.getIntegrator();
+    }
+
+    @Override
     public void activate() {
       clusterNode.activate();
       super.activate();

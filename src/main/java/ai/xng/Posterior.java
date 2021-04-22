@@ -1,7 +1,5 @@
 package ai.xng;
 
-import java.io.IOException;
-import java.io.ObjectInputStream;
 import java.io.Serializable;
 import java.util.Arrays;
 
@@ -19,28 +17,11 @@ public interface Posterior extends Node {
   class Trait implements Serializable {
     private final Posterior owner;
     @Getter
-    private transient ThresholdIntegrator integrator;
-    @Getter
     private final Connections.Priors priors;
 
     public Trait(final Posterior owner) {
       this.owner = owner;
       priors = new Connections.Priors(owner);
-      init();
-    }
-
-    private void init() {
-      integrator = new ThresholdIntegrator() {
-        @Override
-        protected void onThreshold() {
-          owner.activate();
-        }
-      };
-    }
-
-    private void readObject(final ObjectInputStream stream) throws IOException, ClassNotFoundException {
-      stream.defaultReadObject();
-      init();
     }
 
     public void activate() {

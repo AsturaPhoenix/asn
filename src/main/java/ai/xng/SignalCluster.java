@@ -14,6 +14,11 @@ public class SignalCluster extends PosteriorCluster<SignalCluster.Node> {
     }
 
     @Override
+    public ThresholdIntegrator getIntegrator() {
+      return clusterNode.getIntegrator();
+    }
+
+    @Override
     public final void activate() {
       clusterNode.activate();
       super.activate();

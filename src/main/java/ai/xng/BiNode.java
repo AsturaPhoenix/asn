@@ -18,11 +18,6 @@ public abstract class BiNode implements Prior, Posterior {
   }
 
   @Override
-  public ThresholdIntegrator getIntegrator() {
-    return input.getIntegrator();
-  }
-
-  @Override
   public Connections.Priors getPriors() {
     return input.getPriors();
   }
