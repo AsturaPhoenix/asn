@@ -50,6 +50,10 @@ public abstract class ThresholdIntegrator {
 
   private final BakingIntegrator integrator = new BakingIntegrator();
 
+  public boolean isEmpty() {
+    return integrator.isEmpty();
+  }
+
   private TimeSeries<Disposable> nextThreshold;
 
   /**
@@ -129,7 +133,7 @@ public abstract class ThresholdIntegrator {
     return getValue() >= THRESHOLD;
   }
 
-  private void evict() {
+  public void evict() {
     integrator.evict(Scheduler.global.now());
   }
 

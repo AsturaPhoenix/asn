@@ -27,6 +27,10 @@ public class BakingIntegrator {
 
   private final List<Segment> segments = new ArrayList<>();
 
+  public boolean isEmpty() {
+    return segments.isEmpty();
+  }
+
   public void add(final Segment segment) {
     segments.add(segment);
   }

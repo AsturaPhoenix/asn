@@ -44,6 +44,28 @@ public class ClusterTest {
     assertThat(deserialized.cluster.activations()).containsExactly(deserialized.node);
   }
 
+  @Test
+  public void testPriorTouches() {
+    val scheduler = new TestScheduler();
+    Scheduler.global = scheduler;
+
+    val inputCluster = new InputCluster();
+    val outputCluster = new SignalCluster();
+    val input = inputCluster.new Node();
+    val output = outputCluster.new Node();
+    input.getPosteriors().getEdge(output, IntegrationProfile.TRANSIENT).distribution.set(.7f);
+    assertThat(outputCluster.priorTouches()).isEmpty();
+
+    input.activate();
+    assertThat(outputCluster.priorTouches()).containsExactly(output);
+
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period() - 1);
+    assertThat(outputCluster.priorTouches()).containsExactly(output);
+
+    scheduler.fastForwardFor(1);
+    assertThat(outputCluster.priorTouches()).isEmpty();
+  }
+
   private static class GcTestClusters implements Serializable {
     final InputCluster input = new InputCluster();
     final BiCluster intermediate = new BiCluster();

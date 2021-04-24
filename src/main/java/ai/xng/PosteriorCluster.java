@@ -3,6 +3,7 @@ package ai.xng;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 
+import ai.xng.util.EvictingIterator;
 import lombok.Getter;
 import lombok.val;
 
@@ -48,7 +49,13 @@ public abstract class PosteriorCluster<T extends Posterior> extends Cluster<T> {
   private final WeakSerializableRecencyQueue<T> priorTouches = new WeakSerializableRecencyQueue<>();
 
   public Iterable<T> priorTouches() {
-    return priorTouches::iterator;
+    return () -> new EvictingIterator<>(priorTouches.iterator()) {
+      @Override
+      protected boolean shouldEvict(final T item) {
+        item.getIntegrator().evict();
+        return item.getIntegrator().isEmpty();
+      }
+    };
   }
 
   @Getter
