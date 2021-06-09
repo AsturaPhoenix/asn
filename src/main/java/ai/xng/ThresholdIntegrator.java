@@ -70,8 +70,12 @@ public abstract class ThresholdIntegrator {
     return nextThreshold().map(t -> t <= Scheduler.global.now()).orElse(false);
   }
 
-  private float getValue() {
-    return integrator.evaluate(Scheduler.global.now()).value();
+  public float getValue() {
+    return getValue(Scheduler.global.now());
+  }
+
+  public float getValue(final long t) {
+    return integrator.evaluate(t).value();
   }
 
   public float getNormalizedCappedValue() {

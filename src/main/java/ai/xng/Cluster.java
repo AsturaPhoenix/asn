@@ -111,15 +111,19 @@ public abstract class Cluster<T extends Node> implements Serializable {
     }
   }
 
-  private static void associate(final Iterable<PriorClusterProfile> priors, final Posterior posterior,
-      final long t, final float weight) {
+  private static ConjunctionJunction priorConjunction(final Iterable<PriorClusterProfile> priors, final long t) {
     val conjunction = new ConjunctionJunction();
     for (val prior : priors) {
       for (val profile : prior.profiles) {
         forEachByTrace(prior.cluster, profile, t, (node, trace) -> conjunction.add(node, profile, trace));
       }
     }
-    conjunction.build(posterior, (distribution, coefficient) -> {
+    return conjunction;
+  }
+
+  private static void associate(final Iterable<PriorClusterProfile> priors, final Posterior posterior,
+      final long t, final float weight) {
+    priorConjunction(priors, t).build(posterior, (distribution, coefficient) -> {
       // This condition prevents association from ever making pre-existing connections
       // more restrictive.
       if (coefficient >= distribution.getMode()) {
@@ -130,16 +134,69 @@ public abstract class Cluster<T extends Node> implements Serializable {
 
   /**
    * Forms explicit conjunctive associations between the given prior cluster and
-   * posterior cluster, using the given integration profile for the new edges. The
-   * active posteriors considered at the time this function executes are always
-   * based on a {@link IntegrationProfile#TRANSIENT} window.
+   * posterior clusters, using the given integration profiles. The active
+   * posteriors considered at the time this function executes are always based on
+   * a {@link IntegrationProfile#TRANSIENT} window.
    */
+  @Deprecated
   public static void associate(final Iterable<PriorClusterProfile> priors,
       final PosteriorCluster<?> posteriorCluster) {
     forEachByTrace(posteriorCluster, IntegrationProfile.TRANSIENT, Scheduler.global.now(),
         (posterior, posteriorTrace) -> {
           associate(priors, posterior, posterior.getLastActivation().get(), posteriorTrace);
         });
+  }
+
+  /**
+   * Captures posterior activation states to be reproduced by activations in the
+   * given prior clusters, using the given integration profiles. Only active
+   * posteriors are allowed to pull up coefficients, and only inactive posteriors
+   * are allowed to pull them down. (This includes inactive posteriors that are
+   * not yet connected, to capture inhibition.) Pull-up or pull-down is done by
+   * distributing the integration difference across the conjuncted priors.
+   * Integration difference is the difference between the actual observed
+   * posterior integration and the computed contribution of the priors from their
+   * integration profiles and activation traces. Individual adjustments are made
+   * by taking weight from the mode and moving it to the new setpoint.
+   * <p>
+   * Furthermore, to incorporate STDP, the integration state at the time of prior
+   * activation is subtracted from the integration state at the time of capture.
+   * If the difference changes sign once adjusted this way, it is discarded.
+   */
+  public static void capture(final Iterable<PriorClusterProfile> priors,
+      final PosteriorCluster<?> posteriorCluster) {
+    final long t = Scheduler.global.now();
+
+    // First, pre-build a conjunction junction to capture the relative contributions
+    // of the selected priors, before we start looping over posteriors. This will be
+    // used to distribute any weight changes.
+    val conjunction = priorConjunction(priors, t);
+
+    for (final Posterior posterior : posteriorCluster.priorTouches()) {
+      val priorContribution = new float[1];
+      for (val prior : priors) {
+        for (val profile : prior.profiles) {
+          forEachByTrace(prior.cluster, profile, t,
+              (node, trace) -> priorContribution[0] += node.getPosteriors().getEdge(posterior, profile).distribution
+                  .getMode() * trace);
+        }
+      }
+
+      val integrator = posterior.getIntegrator();
+      final float rawResidual = integrator.getValue() - priorContribution[0];
+      final float adjustedResidual = rawResidual - integrator.getValue();
+
+      // Active posteriors are allowed to pull up priors while inactive posteriors are
+      // allowed to pull them down.
+      if (integrator.isActive() && residual > 0 || !integrator.isActive() && residual < 0) {
+        // For simplificity, we don't make any effort to establish an intelligent
+        // conjunctive margin and instead capture the posterior as-is. Additionally, due
+        // to time quantization, note that the posterior may be superthreshold even if
+        // it should naively be merely at threshold.
+        conjunction.build(posterior, 0,
+            (distribution, coefficient) -> distribution.move(distribution.getMode() + residual * coefficient, 1));
+      }
+    }
   }
 
   public static abstract class AssociationBuilder<T> {
@@ -166,6 +223,7 @@ public abstract class Cluster<T extends Node> implements Serializable {
   public static abstract class ChainableAssociationBuilder extends AssociationBuilder<ChainableAssociationBuilder> {
   }
 
+  @Deprecated
   public static ChainableAssociationBuilder associate() {
     return new ChainableAssociationBuilder() {
       @Override
@@ -177,9 +235,25 @@ public abstract class Cluster<T extends Node> implements Serializable {
     };
   }
 
+  @Deprecated
   public static void associate(final Cluster<? extends Prior> priorCluster,
       final PosteriorCluster<?> posteriorCluster) {
     associate().priors(priorCluster).to(posteriorCluster);
+  }
+
+  public static ChainableAssociationBuilder capture() {
+    return new ChainableAssociationBuilder() {
+      @Override
+      protected ChainableAssociationBuilder associate(final Iterable<PriorClusterProfile> priors,
+          final PosteriorCluster<?> posteriorCluster) {
+        capture(priors, posteriorCluster);
+        return this;
+      }
+    };
+  }
+
+  public static void capture(final Cluster<? extends Prior> priorCluster, final PosteriorCluster<?> posteriorCluster) {
+    capture().priors(priorCluster).to(posteriorCluster);
   }
 
   private static float weightByTrace(final float value, final float identity, final float trace) {
@@ -194,6 +268,7 @@ public abstract class Cluster<T extends Node> implements Serializable {
    * which associations are broken are determined by this window and the prior
    * trace.
    */
+  @Deprecated
   public static void disassociate(final Cluster<? extends Prior> priorCluster,
       final Cluster<? extends Posterior> posteriorCluster) {
     forEachByTrace(posteriorCluster, IntegrationProfile.TRANSIENT, Scheduler.global.now(),

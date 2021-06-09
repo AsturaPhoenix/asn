@@ -63,7 +63,11 @@ public interface Posterior extends Node {
   }
 
   default Posterior inhibitor(final Prior prior) {
-    prior.inhibit(this);
+    return inhibitor(prior, IntegrationProfile.TRANSIENT);
+  }
+
+  default Posterior inhibitor(final Prior prior, final IntegrationProfile profile) {
+    prior.inhibit(this, profile);
     return this;
   }
 }

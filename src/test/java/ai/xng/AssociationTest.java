@@ -1,6 +1,7 @@
 package ai.xng;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -11,6 +12,13 @@ import org.junit.jupiter.api.Test;
 import lombok.val;
 
 public class AssociationTest {
+  /**
+   * Without more sophisticated margin adjustment, naive capture can only
+   * guarantee correct behavior for a limited number of priors as determined by
+   * the default margin.
+   */
+  private static final int MAX_PRIORS = (int) (1 / Prior.THRESHOLD_MARGIN);
+
   @Test
   public void testNoPrior() {
     val scheduler = new TestScheduler();
@@ -20,11 +28,11 @@ public class AssociationTest {
     val input = new InputCluster(), output = new ActionCluster();
     val a = input.new Node(), out = TestUtil.testNode(output, monitor);
 
-    out.activate();
-    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.peak());
-    Cluster.associate(input, output);
+    TestUtil.triggerPosterior(out);
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
+    Cluster.capture(input, output);
 
-    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.rampDown());
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
     monitor.reset();
 
     a.activate();
@@ -43,13 +51,143 @@ public class AssociationTest {
     TestUtil.testNode(output, monitor);
 
     a.activate();
-    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.peak());
-    Cluster.associate(input, output);
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
+    Cluster.capture(input, output);
 
-    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.rampDown());
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
     monitor.reset();
 
     a.activate();
+    scheduler.fastForwardUntilIdle();
+    assertFalse(monitor.didEmit());
+  }
+
+  @Test
+  public void testAssociate() {
+    val scheduler = new TestScheduler();
+    Scheduler.global = scheduler;
+
+    val input = new InputCluster(),
+        output = new ActionCluster();
+
+    val in = input.new Node();
+    val monitor = new EmissionMonitor<Long>();
+    val out = TestUtil.testNode(output, monitor);
+
+    in.activate();
+    TestUtil.triggerPosterior(out);
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
+    Cluster.capture(input, output);
+
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
+    monitor.reset();
+
+    in.activate();
+    scheduler.fastForwardUntilIdle();
+    assertTrue(monitor.didEmit());
+  }
+
+  @Test
+  public void testDisassociate() {
+    val scheduler = new TestScheduler();
+    Scheduler.global = scheduler;
+
+    val input = new InputCluster(),
+        output = new ActionCluster();
+
+    val in = input.new Node();
+    val monitor = new EmissionMonitor<Long>();
+    val out = TestUtil.testNode(output, monitor);
+
+    in.then(out);
+    in.activate();
+    TestUtil.inhibitPosterior(out);
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
+    Cluster.capture(input, output);
+
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
+    monitor.reset();
+
+    in.activate();
+    scheduler.fastForwardUntilIdle();
+    assertFalse(monitor.didEmit());
+  }
+
+  @Test
+  public void testIdempotence() {
+    val scheduler = new TestScheduler();
+    Scheduler.global = scheduler;
+
+    val input = new InputCluster(),
+        output = new SignalCluster();
+
+    val in = input.new Node(), out = output.new Node();
+
+    in.then(out);
+    val distribution = in.getPosteriors().getEdge(out, IntegrationProfile.TRANSIENT).distribution;
+
+    in.activate();
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
+
+    // This weight may not be the default due to STDP. However, it should not change
+    // further due merely to a capture operation.
+    val prevWeight = distribution.getWeight();
+    Cluster.capture(input, output);
+
+    assertEquals(Prior.DEFAULT_COEFFICIENT, distribution.getMode());
+    assertEquals(prevWeight, distribution.getWeight());
+  }
+
+  @Test
+  public void testNoCoincidentAssociate() {
+    val scheduler = new TestScheduler();
+    Scheduler.global = scheduler;
+
+    val input = new InputCluster(),
+        output = new ActionCluster();
+
+    val in = input.new Node();
+    val monitor = new EmissionMonitor<Long>();
+    val out = TestUtil.testNode(output, monitor);
+
+    TestUtil.triggerPosterior(out);
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
+    in.activate();
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
+    Cluster.capture(input, output);
+
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
+    monitor.reset();
+
+    in.activate();
+    scheduler.fastForwardUntilIdle();
+    assertFalse(monitor.didEmit());
+  }
+
+  @Test
+  public void testCoincidentDisassociate() {
+    val scheduler = new TestScheduler();
+    Scheduler.global = scheduler;
+
+    val input = new InputCluster(),
+        output = new ActionCluster();
+
+    val in = input.new Node();
+    val monitor = new EmissionMonitor<Long>();
+    val out = TestUtil.testNode(output, monitor);
+
+    in.then(out);
+    TestUtil.triggerPosterior(out);
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
+    in.activate();
+    TestUtil.inhibitPosterior(out);
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
+    Cluster.capture(input, output);
+
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
+    monitor.reset();
+
+    in.activate();
     scheduler.fastForwardUntilIdle();
     assertFalse(monitor.didEmit());
   }
@@ -59,8 +197,9 @@ public class AssociationTest {
     val scheduler = new TestScheduler();
     Scheduler.global = scheduler;
 
-    for (int n = 1; n <= 10; ++n) {
-      val input = new InputCluster(), output = new ActionCluster();
+    for (int n = 2; n <= MAX_PRIORS; ++n) {
+      val input = new InputCluster(),
+          output = new ActionCluster();
 
       val in = new InputNode[n];
       for (int i = 0; i < in.length; ++i) {
@@ -68,15 +207,13 @@ public class AssociationTest {
         in[i].activate();
       }
 
-      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.peak());
-
       val monitor = new EmissionMonitor<Long>();
       val out = TestUtil.testNode(output, monitor);
-      out.activate();
-      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.peak());
-      Cluster.associate(input, output);
+      TestUtil.triggerPosterior(out);
+      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
+      Cluster.capture(input, output);
 
-      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.rampDown());
+      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
       monitor.reset();
 
       for (val i : in) {
@@ -92,7 +229,7 @@ public class AssociationTest {
     val scheduler = new TestScheduler();
     Scheduler.global = scheduler;
 
-    for (int n = 1; n <= 10; ++n) {
+    for (int n = 2; n <= MAX_PRIORS; ++n) {
       val input = new InputCluster(), output = new ActionCluster();
 
       val in = new InputNode[n];
@@ -101,15 +238,13 @@ public class AssociationTest {
         in[i].activate();
       }
 
-      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.peak());
-
       val monitor = new EmissionMonitor<Long>();
       val out = TestUtil.testNode(output, monitor);
-      out.activate();
-      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.peak());
-      Cluster.associate(input, output);
+      TestUtil.triggerPosterior(out);
+      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
+      Cluster.capture(input, output);
 
-      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.rampDown());
+      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
       monitor.reset();
 
       for (int i = 0; i < in.length - 1; ++i) {
@@ -125,7 +260,7 @@ public class AssociationTest {
     val scheduler = new TestScheduler();
     Scheduler.global = scheduler;
 
-    for (int n = 1; n <= 10; ++n) {
+    for (int n = 2; n <= MAX_PRIORS; ++n) {
       val input = new InputCluster(), output = new ActionCluster();
 
       val in = new InputNode[n];
@@ -137,11 +272,11 @@ public class AssociationTest {
 
       val monitor = new EmissionMonitor<Long>();
       val out = TestUtil.testNode(output, monitor);
-      out.activate();
-      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.peak());
-      Cluster.associate(input, output);
+      TestUtil.triggerPosterior(out);
+      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
+      Cluster.capture(input, output);
 
-      scheduler.fastForwardFor(IntegrationProfile.PERSISTENT.rampDown());
+      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
       monitor.reset();
 
       for (val i : in) {
@@ -158,7 +293,7 @@ public class AssociationTest {
     val scheduler = new TestScheduler();
     Scheduler.global = scheduler;
 
-    for (int n = 1; n <= 10; ++n) {
+    for (int n = 2; n <= MAX_PRIORS; ++n) {
       val input = new InputCluster(), output = new ActionCluster();
 
       val in = new InputNode[n];
@@ -170,11 +305,11 @@ public class AssociationTest {
 
       val monitor = new EmissionMonitor<Long>();
       val out = TestUtil.testNode(output, monitor);
-      out.activate();
-      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.peak());
-      Cluster.associate(input, output);
+      TestUtil.triggerPosterior(out);
+      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
+      Cluster.capture(input, output);
 
-      scheduler.fastForwardFor(IntegrationProfile.PERSISTENT.rampDown());
+      scheduler.fastForwardFor(IntegrationProfile.PERSISTENT.period());
       monitor.reset();
 
       for (int i = 0; i < in.length - 1; ++i) {
@@ -194,7 +329,7 @@ public class AssociationTest {
     // This test fails at 4 priors, which is okay as by then the least significant
     // prior will have decayed during training. A previous version with less leeway
     // would not fail until 7 priors.
-    for (int n = 1; n <= 3; ++n) {
+    for (int n = 2; n <= 3; ++n) {
       val input = new InputCluster(), output = new ActionCluster();
 
       val in = new InputNode[n];
@@ -206,11 +341,11 @@ public class AssociationTest {
 
       val monitor = new EmissionMonitor<Long>();
       val out = TestUtil.testNode(output, monitor);
-      out.activate();
-      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.peak());
-      Cluster.associate(input, output);
+      TestUtil.triggerPosterior(out);
+      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
+      Cluster.capture(input, output);
 
-      scheduler.fastForwardFor(IntegrationProfile.PERSISTENT.rampDown());
+      scheduler.fastForwardFor(IntegrationProfile.PERSISTENT.period());
       monitor.reset();
 
       for (int i = 1; i < in.length; ++i) {
@@ -235,7 +370,7 @@ public class AssociationTest {
 
     val in = input.new Node();
     Prior tail = in;
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < MAX_PRIORS; ++i) {
       tail = tail.then(recog.new Node());
     }
 
@@ -244,11 +379,11 @@ public class AssociationTest {
 
     val monitor = new EmissionMonitor<Long>();
     val out = TestUtil.testNode(output, monitor);
-    out.activate();
-    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.peak());
-    Cluster.associate(recog, output);
+    TestUtil.triggerPosterior(out);
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
+    Cluster.capture(recog, output);
 
-    scheduler.fastForwardFor(IntegrationProfile.PERSISTENT.rampDown());
+    scheduler.fastForwardFor(IntegrationProfile.PERSISTENT.period());
     monitor.reset();
 
     in.activate();
@@ -266,15 +401,13 @@ public class AssociationTest {
     final InputNode in = input.new Node();
     in.activate();
 
-    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.peak());
-
     val monitor = new EmissionMonitor<Long>();
     val out = TestUtil.testNode(output, monitor);
-    out.activate();
+    TestUtil.triggerPosterior(out);
     scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
-    Cluster.associate(input, output);
+    Cluster.capture(input, output);
 
-    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.rampDown());
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
     monitor.reset();
 
     in.activate();
@@ -292,15 +425,13 @@ public class AssociationTest {
     final InputNode in = input.new Node();
     in.activate();
 
-    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.peak());
-
     val monitor = new EmissionMonitor<Long>();
     val out = TestUtil.testNode(output, monitor);
-    out.activate();
+    TestUtil.triggerPosterior(out);
     scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period() - 1);
-    Cluster.associate(input, output);
+    Cluster.capture(input, output);
 
-    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.rampDown());
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
     monitor.reset();
 
     in.activate();
@@ -313,7 +444,7 @@ public class AssociationTest {
     val scheduler = new TestScheduler();
     Scheduler.global = scheduler;
 
-    for (int n = 1; n <= 10; ++n) {
+    for (int n = 1; n <= MAX_PRIORS; ++n) {
       val input = new InputCluster(), output = new ActionCluster();
 
       val in = new InputNode[n];
@@ -322,15 +453,15 @@ public class AssociationTest {
         in[i].activate();
       }
 
-      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.peak() + IntegrationProfile.TRANSIENT.period() / 3);
+      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period() / 3);
 
       val monitor = new EmissionMonitor<Long>();
       val out = TestUtil.testNode(output, monitor);
-      out.activate();
-      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.peak());
-      Cluster.associate(input, output);
+      TestUtil.triggerPosterior(out);
+      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
+      Cluster.capture(input, output);
 
-      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.rampDown());
+      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
       monitor.reset();
 
       for (int i = 0; i < in.length - 1; ++i) {
@@ -355,31 +486,32 @@ public class AssociationTest {
 
     for (int i = 0; i < 100; ++i) {
       prior.activate();
+      TestUtil.triggerPosterior(posterior);
       scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
-      posterior.activate();
-      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
-      Cluster.associate(priorCluster, posteriorCluster);
+      Cluster.capture(priorCluster, posteriorCluster);
       scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
 
       monitor.reset();
       prior.activate();
       scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
-      assertTrue(monitor.didEmit(),
-          String.format("Failed on iteration %s. Posteriors: %s", i, prior.getPosteriors()));
+      assertTrue(monitor.didEmit(), String.format("Failed on iteration %s. Posteriors: %s", i, prior.getPosteriors()));
 
       prior.activate();
-      scheduler.fastForwardFor(2 * IntegrationProfile.TRANSIENT.defaultInterval());
-      Cluster.disassociate(priorCluster, posteriorCluster);
+      TestUtil.inhibitPosterior(posterior);
+      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
+      Cluster.capture(priorCluster, posteriorCluster);
       scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
 
       monitor.reset();
       prior.activate();
       scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
-      assertFalse(monitor.didEmit(),
-          String.format("Failed on iteration %s. Posteriors: %s", i, prior.getPosteriors()));
+      assertFalse(monitor.didEmit(), String.format("Failed on iteration %s. Posteriors: %s", i, prior.getPosteriors()));
     }
   }
 
+  // TODO: Use linked structure instead of salience stack. A linked structure
+  // seems more correct and may eliminate the need to keep the disassociate
+  // operation.
   @Test
   public void testStack() {
     val scheduler = new TestScheduler();
@@ -401,10 +533,9 @@ public class AssociationTest {
       scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
 
       testStack.activate();
+      TestUtil.triggerPosterior(item);
       scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
-      item.activate();
-      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
-      Cluster.associate(priorCluster, posteriorCluster);
+      Cluster.capture(priorCluster, posteriorCluster);
       scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
     }
 
@@ -413,8 +544,9 @@ public class AssociationTest {
     while (!refStack.isEmpty()) {
       val item = refStack.pop();
       testStack.activate();
-      scheduler.fastForwardFor(2 * IntegrationProfile.TRANSIENT.defaultInterval());
+      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
       Cluster.scalePosteriors(priorCluster, 1 / KnowledgeBase.STACK_FACTOR);
+      scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
       Cluster.disassociate(priorCluster, posteriorCluster);
       scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
       assertThat(monitor.emissions()).containsExactly(item);
@@ -441,10 +573,9 @@ public class AssociationTest {
     // scaling.
 
     prior.activate();
+    TestUtil.triggerPosterior(posterior);
     scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
-    posterior.activate();
-    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
-    Cluster.associate(priorCluster, posteriorCluster);
+    Cluster.capture(priorCluster, posteriorCluster);
     scheduler.fastForwardFor(IntegrationProfile.PERSISTENT.period());
 
     prior.activate();

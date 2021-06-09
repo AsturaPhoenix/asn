@@ -27,8 +27,8 @@ public class LanguageBootstrap {
     H head;
     Prior tail;
 
-    public Sequence<H> thenDirect(final BiNode next) {
-      tail.then(next);
+    public Sequence<H> thenDirect(final BiNode next, final IntegrationProfile profile) {
+      tail.then(next, profile);
       return new Sequence<>(head, next);
     }
 
@@ -45,18 +45,6 @@ public class LanguageBootstrap {
       return this;
     }
 
-    /**
-     * Produces a chain of nodes that spans roughly {@code period} between head and
-     * tail activation.
-     */
-    public Sequence<H> thenDelay(final long period) {
-      final long dt = IntegrationProfile.TRANSIENT.defaultInterval();
-      for (long t = 0; t < period; t += dt) {
-        tail = tail.then(kb.execution.new Node());
-      }
-      return this;
-    }
-
     public Sequence<H> stanza() {
       return then(control.resetStanza)
           .thenDelay()
@@ -64,6 +52,8 @@ public class LanguageBootstrap {
     }
   }
 
+  // TODO: For compatibility with capture, spawn should copy the integrator state
+  // from the spawn node to the node spawned.
   private class Spawn {
     final ActionCluster.Node stateRecognition = kb.actions.new Node(() -> kb.stateRecognition.new Node().activate()),
         context = kb.actions.new Node(() -> kb.context.new Node().activate()),
@@ -130,9 +120,9 @@ public class LanguageBootstrap {
      * advance the iterator. It can also be inhibited by paths that are not ready to
      * proceed.
      */
-    final BiNode advance = kb.execution.new Node();
+    final BiNode advance = kb.entrypoint.new Node();
     final BooleanDecoder hasNextDecoder = new BooleanDecoder(kb.actions, kb.data, kb.input,
-        data -> data instanceof Iterator<?>i ? Optional.of(i.hasNext()) : Optional.empty());
+        data -> data instanceof Iterator<?> i ? Optional.of(i.hasNext()) : Optional.empty());
     final BiNode codePoint = kb.naming.new Node();
     final InputCluster charCluster = new InputCluster();
     final CharacterDecoder charDecoder = new CharacterDecoder(kb.actions, kb.data, charCluster);
@@ -147,6 +137,8 @@ public class LanguageBootstrap {
           .stanza()
           .then(control.stackFrame.address)
           .then(iterator)
+          // TODO: To use capture with spawn, we need to activate the spawned node's
+          // integrator.
           .then(spawn.data)
           .then(kb.associate(control.frameFieldPriors, kb.data))
 
@@ -171,6 +163,7 @@ public class LanguageBootstrap {
           .then(advance);
 
       asSequence(advance)
+          .then(kb.resetPriors(kb.entrypoint))
           .stanza()
           .then(control.stackFrame.address)
           .then(iterator)
@@ -200,8 +193,7 @@ public class LanguageBootstrap {
           // TODO: We might consider binding codePoint to a register first to avoid
           // polluted state during recognition.
           // Advance by default unless inhibited.
-          .thenDelay(IntegrationProfile.TRANSIENT.period())
-          .thenDirect(advance);
+          .thenDirect(advance, IntegrationProfile.PERSISTENT);
     }
   }
 
@@ -276,8 +268,7 @@ public class LanguageBootstrap {
       asSequence(captureReturn)
           .stanza()
           .then(control.returnValue.address)
-          .thenDelay()
-          .then(kb.associate()
+          .then(kb.capture()
               .baseProfiles(IntegrationProfile.TWOGRAM)
               .priors(kb.sequenceRecognition)
               .to(kb.stateRecognition))
@@ -321,13 +312,13 @@ public class LanguageBootstrap {
 
       val bindPrint = kb.execution.new Node();
       bindPrint.conjunction(bindPrintEntrypoint, staticContext);
-      bindPrint.inhibit(stringIterator.advance);
+      bindPrint.inhibit(stringIterator.advance, IntegrationProfile.PERSISTENT);
       asSequence(bindPrint)
           .stanza()
           .then(control.stackFrame.address)
           .then(constructionPointer, control.cxt.address, kb.suppressPosteriors(control.cxt))
-          .then(kb.clearPosteriors(control.cxt))
-          .then(kb.associate(control.cxt, kb.context))
+          .then(kb.capture(control.cxt, kb.context))
+          .then(kb.actions.new Node(() -> System.out.println(control.cxt.address.getPosteriors())))
 
           .stanza()
           .then(control.cxt.address)
@@ -475,7 +466,7 @@ public class LanguageBootstrap {
       kb.actions.new Node(isParsing).conjunction(recognitionClass.character, parse.staticContext);
 
       start.then(kb.actions.new Node(() -> builder.setLength(0)));
-      end.inhibit(stringIterator.advance);
+      end.inhibit(stringIterator.advance, IntegrationProfile.PERSISTENT);
       asSequence(end)
           .stanza()
           .then(control.stackFrame.address)
@@ -499,13 +490,13 @@ public class LanguageBootstrap {
       val notQuote = kb.stateRecognition.new Node();
       recognitionClass.character.then(notQuote).inhibitor(quote);
       append.conjunction(notQuote, isParsing.isTrue);
-      append.inhibit(stringIterator.advance);
+      append.inhibit(stringIterator.advance, IntegrationProfile.PERSISTENT);
       asSequence(append)
           .stanza()
           .then(control.stackFrame.address)
           .then(stringIterator.codePoint)
           .then(new CoincidentEffect.Lambda<>(kb.actions, kb.data, node -> {
-            if (node.getData() instanceof Integer codePoint) {
+            if (node.getData()instanceof Integer codePoint) {
               builder.appendCodePoint(codePoint);
             }
           }).node)

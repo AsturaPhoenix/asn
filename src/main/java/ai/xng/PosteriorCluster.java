@@ -8,7 +8,14 @@ import lombok.Getter;
 import lombok.val;
 
 public abstract class PosteriorCluster<T extends Posterior> extends Cluster<T> {
-  public static final float DEFAULT_PLASTICITY = .1f;
+  /**
+   * Plasticity is disabled for now until requirements become clearer. It's likely
+   * that the STDP behavior needs to be adjusted to penalize connections that do
+   * not trigger. However, it is also possible that explicit plasticity in the
+   * generalized capture mechanism is preferable to "always-on" plasticity in this
+   * manner.
+   */
+  public static final float DEFAULT_PLASTICITY = 0;
 
   protected class ClusterNodeTrait extends Cluster<T>.ClusterNodeTrait {
     private final T owner;
@@ -48,6 +55,10 @@ public abstract class PosteriorCluster<T extends Posterior> extends Cluster<T> {
 
   private final WeakSerializableRecencyQueue<T> priorTouches = new WeakSerializableRecencyQueue<>();
 
+  /**
+   * An iterable view of node by prior activation recency. Nodes are evicted from
+   * this view when their integrators become empty.
+   */
   public Iterable<T> priorTouches() {
     return () -> new EvictingIterator<>(priorTouches.iterator()) {
       @Override

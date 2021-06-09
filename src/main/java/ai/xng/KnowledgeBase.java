@@ -73,10 +73,6 @@ public class KnowledgeBase implements Serializable, AutoCloseable {
     return clearPosteriors.computeIfAbsent(cluster, key -> actions.new Node(() -> Cluster.disassociateAll(key)));
   }
 
-  private static record AssociateKey(Set<PriorClusterProfile> priors, PosteriorCluster<?> posteriorCluster)
-      implements Serializable {
-  }
-
   private static record ResetPosteriorsKey(Cluster<? extends Prior> cluster, boolean outboundOnly) {
   }
 
@@ -115,14 +111,66 @@ public class KnowledgeBase implements Serializable, AutoCloseable {
     return resetPosteriors(cluster, true);
   }
 
+  private final Map<Cluster<? extends Posterior>, ActionCluster.Node> resetPriors = new HashMap<>();
+
+  /**
+   * Resets the priors of recently activated nodes in a posterior cluster.
+   */
+  public ActionCluster.Node resetPriors(final Cluster<? extends Posterior> cluster) {
+    return resetPriors.computeIfAbsent(cluster,
+        key -> actions.new Node(() -> {
+          final long now = Scheduler.global.now();
+          final long horizon = now - IntegrationProfile.PERSISTENT.period();
+
+          for (val node : key.activations()) {
+            if (node.getLastActivation().get() <= horizon) {
+              break;
+            }
+
+            for (val entry : node.getPriors()) {
+              entry.edge().clearSpikes();
+            }
+          }
+        }));
+  }
+
+  private static record AssociateKey(Set<PriorClusterProfile> priors, PosteriorCluster<?> posteriorCluster)
+      implements Serializable {
+  }
+
+  private final Map<AssociateKey, ActionCluster.Node> capture = new HashMap<>();
+
+  public ActionCluster.Node capture(final Iterable<PriorClusterProfile> priors,
+      final PosteriorCluster<?> posteriorCluster) {
+    return capture.computeIfAbsent(new AssociateKey(ImmutableSet.copyOf(priors), posteriorCluster),
+        key -> actions.new Node(() -> Cluster.capture(key.priors, key.posteriorCluster)));
+  }
+
+  public Cluster.AssociationBuilder<ActionCluster.Node> capture() {
+    return new Cluster.AssociationBuilder<>() {
+      @Override
+      protected ActionCluster.Node associate(final Iterable<PriorClusterProfile> priors,
+          final PosteriorCluster<?> posteriorCluster) {
+        return KnowledgeBase.this.capture(priors, posteriorCluster);
+      }
+    };
+  }
+
+  public ActionCluster.Node capture(final Cluster<? extends Prior> priorCluster,
+      final PosteriorCluster<?> posteriorCluster) {
+    return capture().priors(priorCluster).to(posteriorCluster);
+  }
+
   private final Map<AssociateKey, ActionCluster.Node> associate = new HashMap<>();
 
+  @Deprecated
   public ActionCluster.Node associate(final Iterable<PriorClusterProfile> priors,
       final PosteriorCluster<?> posteriorCluster) {
     return associate.computeIfAbsent(new AssociateKey(ImmutableSet.copyOf(priors), posteriorCluster),
         key -> actions.new Node(() -> Cluster.associate(key.priors, key.posteriorCluster)));
   }
 
+  @Deprecated
   public Cluster.AssociationBuilder<ActionCluster.Node> associate() {
     return new Cluster.AssociationBuilder<>() {
       @Override
@@ -133,6 +181,7 @@ public class KnowledgeBase implements Serializable, AutoCloseable {
     };
   }
 
+  @Deprecated
   public ActionCluster.Node associate(final Cluster<? extends Prior> priorCluster,
       final PosteriorCluster<?> posteriorCluster) {
     return associate().priors(priorCluster).to(posteriorCluster);

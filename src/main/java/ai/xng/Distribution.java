@@ -9,6 +9,14 @@ public interface Distribution {
 
   void add(float value, float weight);
 
+  /**
+   * Moves weight from the mode to a new value.
+   */
+  default void move(float value, float weight) {
+    add(getMode(), -weight);
+    add(value, weight);
+  }
+
   default void reinforce(float weight) {
     add(getMode(), weight);
   }

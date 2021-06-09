@@ -55,6 +55,10 @@ public interface Prior extends Node {
   }
 
   default void inhibit(final Posterior posterior) {
-    getPosteriors().getEdge(posterior, IntegrationProfile.TRANSIENT).distribution.set(-1);
+    inhibit(posterior, IntegrationProfile.TRANSIENT);
+  }
+
+  default void inhibit(final Posterior posterior, final IntegrationProfile profile) {
+    getPosteriors().getEdge(posterior, profile).distribution.set(-1);
   }
 }

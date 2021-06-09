@@ -51,13 +51,18 @@ public class ConjunctionJunction {
     return build(posterior, Distribution::set);
   }
 
+  public <T extends Posterior> T build(final T posterior, final BiConsumer<Distribution, Float> update) {
+    return build(posterior, Prior.THRESHOLD_MARGIN, update);
+  }
+
   /**
    * Associates the added priors with the given posterior. The proposed weights
    * are calculated conjunctively but added to the posterior disjunctively, so
    * that priors already more strongly associated with the posterior are not
    * weakened.
    */
-  public <T extends Posterior> T build(final T posterior, final BiConsumer<Distribution, Float> update) {
+  public <T extends Posterior> T build(final T posterior, final float margin,
+      final BiConsumer<Distribution, Float> update) {
     // Scale such that activation of the last principal component (may be
     // hypothetical, with relative weight 1) roughly has margins on either side of
     // the activation threshold (but cap the maximum at the default coefficient, and
@@ -66,12 +71,14 @@ public class ConjunctionJunction {
     // The actual formulation of the above, (norm - 1) / (1 - .5 / norm), doesn't
     // work as well in the presence of less significant components as the below, as
     // it produces false positives.
-    float normAdj = norm / (maxComponent * maxComponent);
-    normAdj = Math.max(normAdj / Prior.DEFAULT_COEFFICIENT, normAdj - .5f) * maxComponent;
+    float normAdj = norm / maxComponent;
+    if (margin != 0) {
+      normAdj = Math.max(normAdj / (1 + margin), normAdj - maxComponent / 2);
+    }
 
     for (val component : components) {
       final float coefficient = component.weight() / normAdj;
-      assert coefficient <= Prior.DEFAULT_COEFFICIENT;
+      assert coefficient <= Prior.DEFAULT_COEFFICIENT + Math.ulp(Prior.DEFAULT_COEFFICIENT) : coefficient;
       val distribution = component.prior().getPosteriors().getEdge(posterior, component.profile()).distribution;
 
       update.accept(distribution, coefficient);

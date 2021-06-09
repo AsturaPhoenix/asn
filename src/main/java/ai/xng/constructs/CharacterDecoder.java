@@ -90,7 +90,7 @@ public class CharacterDecoder implements Serializable {
     };
 
     node = new CoincidentEffect.Lambda<>(actionCluster, input, node -> {
-      if (node.getData() instanceof Integer codePoint) {
+      if (node.getData()instanceof Integer codePoint) {
         forOutput(codePoint, Node::activate);
       }
     }).node;

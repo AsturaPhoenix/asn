@@ -59,4 +59,20 @@ public class TestUtil {
   public static ActionCluster.Node testNode(final ActionCluster cluster, final EmissionMonitor<Long> monitor) {
     return cluster.new Node(() -> monitor.emit(Scheduler.global.now()));
   }
+
+  /**
+   * Activates a posterior via its integrator. Useful for tests that rely on
+   * integrator states. By itself, this will cause the posterior to activate after
+   * {@code IntegrationProfile.TRANSIENT.defaultInterval()}.
+   */
+  public static void triggerPosterior(final Posterior node) {
+    node.getIntegrator().add(IntegrationProfile.TRANSIENT, Prior.DEFAULT_COEFFICIENT);
+  }
+
+  /**
+   * Inhibits a posterior. Useful for disassociation tests.
+   */
+  public static void inhibitPosterior(final Posterior node) {
+    node.getIntegrator().add(IntegrationProfile.TRANSIENT, -Prior.DEFAULT_COEFFICIENT);
+  }
 }
