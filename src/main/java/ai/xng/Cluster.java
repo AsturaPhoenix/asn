@@ -148,31 +148,49 @@ public abstract class Cluster<T extends Node> implements Serializable {
   }
 
   /**
-   * Captures posterior activation states to be reproduced by activations in the
-   * given prior clusters, using the given integration profiles. Only active
-   * posteriors are allowed to pull up coefficients, and only inactive posteriors
-   * are allowed to pull them down. (This includes inactive posteriors that are
-   * not yet connected, to capture inhibition.) Pull-up or pull-down is done by
-   * distributing the integration difference across the conjuncted priors.
-   * Integration difference is the difference between the actual observed
-   * posterior integration and the computed contribution of the priors from their
-   * integration profiles and activation traces. Individual adjustments are made
-   * by taking weight from the mode and moving it to the new setpoint.
+   * Captures a posterior activation state to be reproduced by activations in the
+   * given prior clusters, using the given integration profiles. Posteriors are
+   * captured by coincidence and priors are captured by trace. Posteriors are
+   * processed as inactive if they are connected to a captured prior but do not
+   * activate at any point during the capture window.
    * <p>
-   * Furthermore, to incorporate STDP, the integration state at the time of prior
-   * activation is subtracted from the integration state at the time of capture.
-   * If the difference changes sign once adjusted this way, it is discarded.
+   * The target activation level for a posterior is the default margin on either
+   * side of the threshold depending on its state at the time of capture. The
+   * difference between the current activation level caused by the selected priors
+   * and the target activation level is distributed according to the inverse of
+   * the connection weights. Lower incumbent weights are given the greatest
+   * difference so as to maximize the desired effect. If new priors are added to a
+   * well established set of priors for a posterior but render that posterior
+   * inactive at the time of capture, the new priors are assigned inhibitory
+   * weights.
+   * <p>
+   * A binary target activation level is used rather than pulling up or down
+   * towards the activation level at the time of capture to allow for more margin
+   * of error in the timing of the capture with respect to the posterior
+   * activation. For example, to capture peak activation, the capture would
+   * otherwise have to be done at exactly the peak of the posterior activation,
+   * which is fragile. In the inactive case, this could also capture surprise
+   * residual activation levels that would not be expressed until later.
+   * <p>
+   * Furthermore, it is difficult to define a reasonable way to capture activation
+   * level that respects spike timing. Simply capturing the activation level is
+   * likely to capture a decaying "posterior" that may actually have preceded its
+   * "priors".
    */
   public static void capture(final Iterable<PriorClusterProfile> priors,
       final PosteriorCluster<?> posteriorCluster) {
     final long t = Scheduler.global.now();
 
-    // First, pre-build a conjunction junction to capture the relative contributions
-    // of the selected priors, before we start looping over posteriors. This will be
-    // used to distribute any weight changes.
-    val conjunction = priorConjunction(priors, t);
-
     for (final Posterior posterior : posteriorCluster.priorTouches()) {
+      // or activations? but race?
+      // TODO: break
+      val conjunction = new ConjunctionJunction();
+      for (val prior : priors) {
+        for (val profile : prior.profiles) {
+          forEachByTrace(prior.cluster, profile, t, (node, trace) -> conjunction.add(node, profile, trace));
+        }
+      }
+
       val priorContribution = new float[1];
       for (val prior : priors) {
         for (val profile : prior.profiles) {

@@ -57,9 +57,7 @@ public class ConjunctionJunction {
 
   /**
    * Associates the added priors with the given posterior. The proposed weights
-   * are calculated conjunctively but added to the posterior disjunctively, so
-   * that priors already more strongly associated with the posterior are not
-   * weakened.
+   * are calculated conjunctively.
    */
   public <T extends Posterior> T build(final T posterior, final float margin,
       final BiConsumer<Distribution, Float> update) {
