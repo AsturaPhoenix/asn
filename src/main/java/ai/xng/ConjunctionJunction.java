@@ -1,18 +1,21 @@
 package ai.xng;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.function.BiConsumer;
+
+import com.google.common.collect.Iterators;
 
 import lombok.RequiredArgsConstructor;
 import lombok.val;
 
 @RequiredArgsConstructor
-public class ConjunctionJunction {
-  private static record Component(Prior prior, IntegrationProfile profile, float weight) {
+public class ConjunctionJunction implements Iterable<ConjunctionJunction.Component> {
+  public static record Component(Prior node, IntegrationProfile profile, float weight) {
   }
 
-  private final List<Component> components = new ArrayList<>();
+  private final List<Component> priors = new ArrayList<>();
   // Norm keeps a projected summation under the delay before posterior activation
   // captured during training. However, this can be unrealistic if the maximum
   // sum, which would actually trigger activation, occurs well earlier, leading to
@@ -24,6 +27,11 @@ public class ConjunctionJunction {
   // At the same time, also keep the min component to fine-tune the discrimination
   // margin.
   private float norm, maxComponent;
+
+  @Override
+  public Iterator<Component> iterator() {
+    return Iterators.unmodifiableIterator(priors.iterator());
+  }
 
   public ConjunctionJunction addAll(final Iterable<? extends Prior> priors) {
     for (val prior : priors) {
@@ -38,7 +46,7 @@ public class ConjunctionJunction {
 
   public ConjunctionJunction add(final Prior prior, final IntegrationProfile profile, final float weight) {
     if (weight > 0) {
-      components.add(new Component(prior, profile, weight));
+      priors.add(new Component(prior, profile, weight));
       norm += weight * weight;
       if (weight > maxComponent) {
         maxComponent = weight;
@@ -52,7 +60,8 @@ public class ConjunctionJunction {
   }
 
   public <T extends Posterior> T build(final T posterior, final BiConsumer<Distribution, Float> update) {
-    return build(posterior, Prior.THRESHOLD_MARGIN, update);
+    return build(posterior, Prior.THRESHOLD_MARGIN, (prior, coefficient) -> update
+        .accept(prior.node().getPosteriors().getEdge(posterior, prior.profile()).distribution, coefficient));
   }
 
   /**
@@ -60,7 +69,7 @@ public class ConjunctionJunction {
    * are calculated conjunctively.
    */
   public <T extends Posterior> T build(final T posterior, final float margin,
-      final BiConsumer<Distribution, Float> update) {
+      final BiConsumer<Component, Float> update) {
     // Scale such that activation of the last principal component (may be
     // hypothetical, with relative weight 1) roughly has margins on either side of
     // the activation threshold (but cap the maximum at the default coefficient, and
@@ -74,12 +83,10 @@ public class ConjunctionJunction {
       normAdj = Math.max(normAdj / (1 + margin), normAdj - maxComponent / 2);
     }
 
-    for (val component : components) {
-      final float coefficient = component.weight() / normAdj;
+    for (val prior : priors) {
+      final float coefficient = prior.weight() / normAdj;
       assert coefficient <= Prior.DEFAULT_COEFFICIENT + Math.ulp(Prior.DEFAULT_COEFFICIENT) : coefficient;
-      val distribution = component.prior().getPosteriors().getEdge(posterior, component.profile()).distribution;
-
-      update.accept(distribution, coefficient);
+      update.accept(prior, coefficient);
     }
 
     return posterior;

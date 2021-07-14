@@ -15,6 +15,10 @@ import io.reactivex.Observer;
 import io.reactivex.disposables.Disposable;
 import lombok.val;
 
+/**
+ * Note that although this class is serializable in terms of wiring, since
+ * integrators are transient, so is activation state.
+ */
 public abstract class CoincidentEffect<T extends Posterior> implements Serializable {
   public static class Lambda<T extends Posterior> extends CoincidentEffect<T> {
     public interface Effect<T extends Posterior> extends Consumer<T>, Serializable {
@@ -72,14 +76,14 @@ public abstract class CoincidentEffect<T extends Posterior> implements Serializa
   public final PosteriorCluster<? extends T> cluster;
 
   public CoincidentEffect(final ActionCluster actionCluster, final PosteriorCluster<? extends T> effectCluster) {
-    node = actionCluster.new Node(this::applyPending);
+    node = actionCluster.new Node(this::onActivate);
     cluster = effectCluster;
     subscribe();
   }
 
   protected abstract void apply(T node);
 
-  private void applyPending() {
+  protected void onActivate() {
     for (val recent : cluster.activations()) {
       if (recent.getIntegrator().isPending()) {
         // This case will be handled by the subscription.

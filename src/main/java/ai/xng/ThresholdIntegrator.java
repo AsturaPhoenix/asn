@@ -100,7 +100,7 @@ public abstract class ThresholdIntegrator {
       return;
     }
 
-    final Optional<Long> updatedNextThreshold = nextThreshold(now);
+    final Optional<Long> updatedNextThreshold = nextThreshold(now, 1);
     if (nextThreshold == null || updatedNextThreshold.map(t -> t != nextThreshold.time())
         .orElse(true)) {
       if (nextThreshold != null) {
@@ -110,13 +110,16 @@ public abstract class ThresholdIntegrator {
     }
   }
 
-  public Optional<Long> nextThreshold(long t) {
+  /**
+   * @param direction 1 for rising, -1 for falling
+   */
+  public Optional<Long> nextThreshold(long t, final int direction) {
     while (true) {
       val trajectory = integrator.evaluate(t);
       val nextCriticalPoint = integrator.nextCriticalPoint(t);
 
-      if (trajectory.value() < THRESHOLD) {
-        if (trajectory.rate() > 0) {
+      if (Math.signum(Float.compare(THRESHOLD, trajectory.value())) == direction) {
+        if (Math.signum(trajectory.rate()) == direction) {
           final long intercept = t + (long) Math.ceil((THRESHOLD - trajectory.value()) / trajectory.rate());
           if (nextCriticalPoint.map(tc -> intercept <= tc)
               .orElse(true)) {
@@ -145,7 +148,7 @@ public abstract class ThresholdIntegrator {
     nextThreshold = tOpt.map(t -> new TimeSeries<Disposable>(Scheduler.global.postTask(() -> {
       onThreshold();
       evict();
-      schedule(nextThreshold(Scheduler.global.now()));
+      schedule(nextThreshold(Scheduler.global.now(), 1));
     }, t), t))
         .orElse(null);
   }

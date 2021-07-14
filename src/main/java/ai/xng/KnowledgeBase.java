@@ -50,7 +50,9 @@ public class KnowledgeBase implements Serializable, AutoCloseable {
 
   public ActionCluster.Node suppressPosteriors(final BiCluster cluster) {
     return suppressPosteriors.computeIfAbsent(cluster, key -> new CoincidentEffect.Lambda<>(actions, key, node -> {
+      // TODO: Isn't this always 1?
       final float coincidence = node.getIntegrator().getNormalizedCappedValue();
+      assert coincidence == 1;
       for (final Connections.Entry<Posterior> entry : node.getPosteriors()) {
         entry.edge().suppress(coincidence);
       }
