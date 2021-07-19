@@ -9,28 +9,43 @@ import java.util.Stack;
 
 import org.junit.jupiter.api.Test;
 
+import ai.xng.Cluster.PriorClusterProfile;
 import lombok.val;
 
-public class AssociationTest {
-  /**
-   * Without more sophisticated margin adjustment, naive capture can only
-   * guarantee correct behavior for a limited number of priors as determined by
-   * the default margin.
-   */
-  private static final int MAX_PRIORS = (int) (1 / Prior.THRESHOLD_MARGIN);
+public class CaptureTest {
+  private static final int MAX_PRIORS = 10;
+
+  private final Scheduler scheduler = new TestScheduler();
+  {
+    Scheduler.global = scheduler;
+  }
+
+  private final ActionCluster actions = new ActionCluster();
+
+  private Cluster.CaptureBuilder capture() {
+    return new Cluster.CaptureBuilder() {
+      @Override
+      protected ai.xng.ActionCluster.Node capture(final Iterable<PriorClusterProfile> priors,
+          final PosteriorCluster<?> posteriorCluster) {
+        return new Cluster.Capture(actions, priors, posteriorCluster).node;
+      }
+    };
+  }
+
+  private ActionCluster.Node capture(final Cluster<? extends Prior> priorCluster,
+      final PosteriorCluster<?> posteriorCluster) {
+    return capture().priors(priorCluster).posteriors(posteriorCluster);
+  }
 
   @Test
   public void testNoPrior() {
-    val scheduler = new TestScheduler();
-    Scheduler.global = scheduler;
-
     val monitor = new EmissionMonitor<Long>();
     val input = new InputCluster(), output = new ActionCluster();
     val a = input.new Node(), out = TestUtil.testNode(output, monitor);
 
     TestUtil.triggerPosterior(out);
+    TestUtil.triggerPosterior(capture(input, output));
     scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
-    Cluster.capture(input, output);
 
     scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
     monitor.reset();
@@ -42,17 +57,14 @@ public class AssociationTest {
 
   @Test
   public void testNoPosterior() {
-    val scheduler = new TestScheduler();
-    Scheduler.global = scheduler;
-
     val monitor = new EmissionMonitor<Long>();
     val input = new InputCluster(), output = new ActionCluster();
     val a = input.new Node();
     TestUtil.testNode(output, monitor);
 
     a.activate();
+    TestUtil.triggerPosterior(capture(input, output));
     scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
-    Cluster.capture(input, output);
 
     scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
     monitor.reset();
@@ -64,9 +76,6 @@ public class AssociationTest {
 
   @Test
   public void testAssociate() {
-    val scheduler = new TestScheduler();
-    Scheduler.global = scheduler;
-
     val input = new InputCluster(),
         output = new ActionCluster();
 
@@ -76,8 +85,30 @@ public class AssociationTest {
 
     in.activate();
     TestUtil.triggerPosterior(out);
+    TestUtil.triggerPosterior(capture(input, output));
     scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
-    Cluster.capture(input, output);
+
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
+    monitor.reset();
+
+    in.activate();
+    scheduler.fastForwardUntilIdle();
+    assertTrue(monitor.didEmit());
+  }
+
+  @Test
+  public void testAlreadyAssociated() {
+    val input = new InputCluster(),
+        output = new ActionCluster();
+
+    val in = input.new Node();
+    val monitor = new EmissionMonitor<Long>();
+    val out = TestUtil.testNode(output, monitor);
+
+    in.then(out);
+    in.activate();
+    TestUtil.triggerPosterior(capture(input, output));
+    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
 
     scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
     monitor.reset();
@@ -89,9 +120,6 @@ public class AssociationTest {
 
   @Test
   public void testDisassociate() {
-    val scheduler = new TestScheduler();
-    Scheduler.global = scheduler;
-
     val input = new InputCluster(),
         output = new ActionCluster();
 
@@ -102,8 +130,8 @@ public class AssociationTest {
     in.then(out);
     in.activate();
     TestUtil.inhibitPosterior(out);
+    TestUtil.triggerPosterior(capture(input, output));
     scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
-    Cluster.capture(input, output);
 
     scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
     monitor.reset();
@@ -114,35 +142,7 @@ public class AssociationTest {
   }
 
   @Test
-  public void testIdempotence() {
-    val scheduler = new TestScheduler();
-    Scheduler.global = scheduler;
-
-    val input = new InputCluster(),
-        output = new SignalCluster();
-
-    val in = input.new Node(), out = output.new Node();
-
-    in.then(out);
-    val distribution = in.getPosteriors().getEdge(out, IntegrationProfile.TRANSIENT).distribution;
-
-    in.activate();
-    scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
-
-    // This weight may not be the default due to STDP. However, it should not change
-    // further due merely to a capture operation.
-    val prevWeight = distribution.getWeight();
-    Cluster.capture(input, output);
-
-    assertEquals(Prior.DEFAULT_COEFFICIENT, distribution.getMode());
-    assertEquals(prevWeight, distribution.getWeight());
-  }
-
-  @Test
   public void testNoCoincidentAssociate() {
-    val scheduler = new TestScheduler();
-    Scheduler.global = scheduler;
-
     val input = new InputCluster(),
         output = new ActionCluster();
 
@@ -153,8 +153,8 @@ public class AssociationTest {
     TestUtil.triggerPosterior(out);
     scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
     in.activate();
+    TestUtil.triggerPosterior(capture(input, output));
     scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
-    Cluster.capture(input, output);
 
     scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
     monitor.reset();
@@ -166,9 +166,6 @@ public class AssociationTest {
 
   @Test
   public void testCoincidentDisassociate() {
-    val scheduler = new TestScheduler();
-    Scheduler.global = scheduler;
-
     val input = new InputCluster(),
         output = new ActionCluster();
 
@@ -181,8 +178,8 @@ public class AssociationTest {
     scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
     in.activate();
     TestUtil.inhibitPosterior(out);
+    TestUtil.triggerPosterior(capture(input, output));
     scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.defaultInterval());
-    Cluster.capture(input, output);
 
     scheduler.fastForwardFor(IntegrationProfile.TRANSIENT.period());
     monitor.reset();

@@ -69,12 +69,6 @@ public class KnowledgeBase implements Serializable, AutoCloseable {
         key -> actions.new Node(() -> Cluster.scalePosteriors(key.cluster, key.factor)));
   }
 
-  private final Map<Cluster<? extends Prior>, ActionCluster.Node> clearPosteriors = new HashMap<>();
-
-  public ActionCluster.Node clearPosteriors(final Cluster<? extends Prior> cluster) {
-    return clearPosteriors.computeIfAbsent(cluster, key -> actions.new Node(() -> Cluster.disassociateAll(key)));
-  }
-
   private static record ResetPosteriorsKey(Cluster<? extends Prior> cluster, boolean outboundOnly) {
   }
 
@@ -136,22 +130,22 @@ public class KnowledgeBase implements Serializable, AutoCloseable {
         }));
   }
 
-  private static record AssociateKey(Set<PriorClusterProfile> priors, PosteriorCluster<?> posteriorCluster)
+  private static record CaptureKey(Set<PriorClusterProfile> priors, PosteriorCluster<?> posteriorCluster)
       implements Serializable {
   }
 
-  private final Map<AssociateKey, ActionCluster.Node> capture = new HashMap<>();
+  private final Map<CaptureKey, ActionCluster.Node> capture = new HashMap<>();
 
   public ActionCluster.Node capture(final Iterable<PriorClusterProfile> priors,
       final PosteriorCluster<?> posteriorCluster) {
-    return capture.computeIfAbsent(new AssociateKey(ImmutableSet.copyOf(priors), posteriorCluster),
-        key -> actions.new Node(() -> Cluster.capture(key.priors, key.posteriorCluster)));
+    return capture.computeIfAbsent(new CaptureKey(ImmutableSet.copyOf(priors), posteriorCluster),
+        key -> new Cluster.Capture(actions, key.priors, key.posteriorCluster).node);
   }
 
-  public Cluster.AssociationBuilder<ActionCluster.Node> capture() {
-    return new Cluster.AssociationBuilder<>() {
+  public Cluster.CaptureBuilder capture() {
+    return new Cluster.CaptureBuilder() {
       @Override
-      protected ActionCluster.Node associate(final Iterable<PriorClusterProfile> priors,
+      protected ActionCluster.Node capture(final Iterable<PriorClusterProfile> priors,
           final PosteriorCluster<?> posteriorCluster) {
         return KnowledgeBase.this.capture(priors, posteriorCluster);
       }
@@ -160,45 +154,7 @@ public class KnowledgeBase implements Serializable, AutoCloseable {
 
   public ActionCluster.Node capture(final Cluster<? extends Prior> priorCluster,
       final PosteriorCluster<?> posteriorCluster) {
-    return capture().priors(priorCluster).to(posteriorCluster);
-  }
-
-  private final Map<AssociateKey, ActionCluster.Node> associate = new HashMap<>();
-
-  @Deprecated
-  public ActionCluster.Node associate(final Iterable<PriorClusterProfile> priors,
-      final PosteriorCluster<?> posteriorCluster) {
-    return associate.computeIfAbsent(new AssociateKey(ImmutableSet.copyOf(priors), posteriorCluster),
-        key -> actions.new Node(() -> Cluster.associate(key.priors, key.posteriorCluster)));
-  }
-
-  @Deprecated
-  public Cluster.AssociationBuilder<ActionCluster.Node> associate() {
-    return new Cluster.AssociationBuilder<>() {
-      @Override
-      protected ActionCluster.Node associate(final Iterable<PriorClusterProfile> priors,
-          final PosteriorCluster<?> posteriorCluster) {
-        return KnowledgeBase.this.associate(priors, posteriorCluster);
-      }
-    };
-  }
-
-  @Deprecated
-  public ActionCluster.Node associate(final Cluster<? extends Prior> priorCluster,
-      final PosteriorCluster<?> posteriorCluster) {
-    return associate().priors(priorCluster).to(posteriorCluster);
-  }
-
-  private static record DisassociateKey(Cluster<? extends Prior> priorCluster, PosteriorCluster<?> posteriorCluster)
-      implements Serializable {
-  }
-
-  private final Map<DisassociateKey, ActionCluster.Node> disassociate = new HashMap<>();
-
-  public ActionCluster.Node disassociate(final Cluster<? extends Prior> priorCluster,
-      final PosteriorCluster<?> posteriorCluster) {
-    return disassociate.computeIfAbsent(new DisassociateKey(priorCluster, posteriorCluster),
-        key -> actions.new Node(() -> Cluster.disassociate(key.priorCluster, key.posteriorCluster)));
+    return capture().priors(priorCluster).posteriors(posteriorCluster);
   }
 
   public KnowledgeBase() {

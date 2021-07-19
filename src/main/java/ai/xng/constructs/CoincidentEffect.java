@@ -83,6 +83,11 @@ public abstract class CoincidentEffect<T extends Posterior> implements Serializa
 
   protected abstract void apply(T node);
 
+  /**
+   * Subclass implementations must call {@code super.onActivate()}. For a given
+   * activation, this method is guaranteed to be called before any coincident
+   * {@link #apply(Posterior)} calls.
+   */
   protected void onActivate() {
     for (val recent : cluster.activations()) {
       if (recent.getIntegrator().isPending()) {
