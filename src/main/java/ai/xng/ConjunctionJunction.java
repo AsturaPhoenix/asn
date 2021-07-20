@@ -51,6 +51,9 @@ public class ConjunctionJunction implements Iterable<ConjunctionJunction.Compone
       if (weight > maxComponent) {
         maxComponent = weight;
       }
+    } else {
+      // 0s can clear out associations when used in capture.
+      priors.add(new Component(prior, profile, 0));
     }
     return this;
   }
@@ -70,23 +73,30 @@ public class ConjunctionJunction implements Iterable<ConjunctionJunction.Compone
    */
   public <T extends Posterior> T build(final T posterior, final float margin,
       final BiConsumer<Component, Float> update) {
-    // Scale such that activation of the last principal component (may be
-    // hypothetical, with relative weight 1) roughly has margins on either side of
-    // the activation threshold (but cap the maximum at the default coefficient, and
-    // never increase coefficients as a result of normalization).
-    //
-    // The actual formulation of the above, (norm - 1) / (1 - .5 / norm), doesn't
-    // work as well in the presence of less significant components as the below, as
-    // it produces false positives.
-    float normAdj = norm / maxComponent;
-    if (margin != 0) {
-      normAdj = Math.max(normAdj / (1 + margin), normAdj - maxComponent / 2);
-    }
+    if (maxComponent > 0) {
+      // Scale such that activation of the last principal component (may be
+      // hypothetical, with relative weight 1) roughly has margins on either side of
+      // the activation threshold (but cap the maximum at the default coefficient, and
+      // never increase coefficients as a result of normalization).
+      //
+      // The actual formulation of the above, (norm - 1) / (1 - .5 / norm), doesn't
+      // work as well in the presence of less significant components as the below, as
+      // it produces false positives.
+      float normAdj = norm / maxComponent;
+      if (margin != 0) {
+        normAdj = Math.max(normAdj / (1 + margin), normAdj - maxComponent / 2);
+      }
 
-    for (val prior : priors) {
-      final float coefficient = prior.weight() / normAdj;
-      assert coefficient <= Prior.DEFAULT_COEFFICIENT + Math.ulp(Prior.DEFAULT_COEFFICIENT) : coefficient;
-      update.accept(prior, coefficient);
+      for (val prior : priors) {
+        final float coefficient = prior.weight() / normAdj;
+        assert coefficient <= Prior.DEFAULT_COEFFICIENT + Math.ulp(Prior.DEFAULT_COEFFICIENT) : coefficient;
+        update.accept(prior, coefficient);
+      }
+    } else {
+      // The degnereate case approaches full disassociation.
+      for (val prior : priors) {
+        update.accept(prior, 0f);
+      }
     }
 
     return posterior;
